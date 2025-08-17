@@ -3,7 +3,7 @@ import { MetadataScanner, ModulesContainer } from '@nestjs/core';
 import { STATIC_CONTEXT } from "@nestjs/core/injector/constants";
 import { SQS_CONSUMER } from './sqs.decorator';
 import { SqsOptions } from './sqs.types';
-import { DeleteMessageBatchCommand, ReceiveMessageCommand, SQSClient} from '@aws-sdk/client-sqs';
+import { DeleteMessageBatchCommand, ReceiveMessageCommand, SendMessageCommand, SQSClient} from '@aws-sdk/client-sqs';
 
 @Injectable()
 export class SqsService implements OnModuleInit {
@@ -85,6 +85,7 @@ export class SqsService implements OnModuleInit {
   private async initiateListening(url: string, retry: number = 0) {
     // add a latency if its a retry 
     if (retry > 0) {
+      this.logger.log(`Retrying ${url} in ${10 * retry} seconds`)
       await new Promise((resolve) => setTimeout(resolve, 10 * 1000 * retry) )
     }
 
@@ -130,7 +131,16 @@ export class SqsService implements OnModuleInit {
     }
 
     this.logger.log(`Restarting ${url} listener`)
-    this.initiateListening(url)
+    this.initiateListening(url, retry++)
+  }
+
+  async produce(url: string, message: any) {
+    const sendCmd = new SendMessageCommand({
+      QueueUrl: url,
+      MessageBody: message
+    })
+
+    await this.sqsClient.send(sendCmd)
   }
 }
 
