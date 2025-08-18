@@ -4,6 +4,7 @@ import { STATIC_CONTEXT } from "@nestjs/core/injector/constants";
 import { SQS_CONSUMER } from './sqs.decorator';
 import { SqsOptions } from './sqs.types';
 import { DeleteMessageBatchCommand, ReceiveMessageCommand, SendMessageCommand, SQSClient} from '@aws-sdk/client-sqs';
+import { formatWithOptions } from 'util';
 
 @Injectable()
 export class SqsService implements OnModuleInit {
@@ -96,6 +97,7 @@ export class SqsService implements OnModuleInit {
         const receiveCmd = new ReceiveMessageCommand({
           QueueUrl: url,
           MaxNumberOfMessages: 10,
+          WaitTimeSeconds: 10, // enables long polling
         })
         const receiveRes = await this.sqsClient.send(receiveCmd)
         const messages = receiveRes.Messages
@@ -105,7 +107,15 @@ export class SqsService implements OnModuleInit {
         }
 
         const {handler, instance} = this.queueHandlerMap[url]
+
+        const warnTimeInSeconds = 2;
+        const stuckedMsgProcessingTimeout = setTimeout(() => {
+          this.logger.warn(`Messages from ${url} has being waiting for ${warnTimeInSeconds}s to be finished`)
+        }, warnTimeInSeconds * 1000)
+        
         const okayMsgIds: string[] = await handler.call(instance, messages);
+
+        clearTimeout(stuckedMsgProcessingTimeout)
 
         if (!Array.isArray(okayMsgIds)) {
           this.logger.error("SqsConsumer decored function should return successful message ids, received", okayMsgIds)
@@ -127,11 +137,12 @@ export class SqsService implements OnModuleInit {
         }
       } catch (e) {
         this.logger.error(`An error occurred while reading queue ${url}`, e)
+        break;
       }
     }
 
     this.logger.log(`Restarting ${url} listener`)
-    this.initiateListening(url, retry++)
+    this.initiateListening(url, ++retry)
   }
 
   async produce(url: string, message: any) {
