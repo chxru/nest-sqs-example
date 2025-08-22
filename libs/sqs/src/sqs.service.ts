@@ -1,10 +1,9 @@
+import { DeleteMessageBatchCommand, ReceiveMessageCommand, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { MetadataScanner, ModulesContainer } from '@nestjs/core';
 import { STATIC_CONTEXT } from "@nestjs/core/injector/constants";
-import { SQS_CONSUMER } from './sqs.decorator';
+import { SQS_CONSUMER, type SqsConsumerParams } from './sqs.decorator';
 import { SqsOptions } from './sqs.types';
-import { DeleteMessageBatchCommand, ReceiveMessageCommand, SendMessageCommand, SQSClient} from '@aws-sdk/client-sqs';
-import { formatWithOptions } from 'util';
 
 @Injectable()
 export class SqsService implements OnModuleInit {
@@ -15,25 +14,19 @@ export class SqsService implements OnModuleInit {
   constructor(
     private readonly modulesContainer: ModulesContainer,
     private readonly metadataScanner: MetadataScanner,
-    private readonly queueUrls: string[],
+    private readonly queueNameUrlMap: Record<string, string>,
     private readonly sqsOptions?: SqsOptions
   ) {
     this.sqsClient = new SQSClient(sqsOptions || {})
   }
 
   async onModuleInit() {
-    // if there is no queues, do not go further
-    if (!this.queueUrls.length) {
-      this.logger.warn("You are initiating SqsModule without providing any URLs. Module will not initiate further")
-      return;
-    }
-
     // check of active listeners
     const components = this.modulesContainer.entries();
-    for (const [_, component] of components) {
+    for (const [, component] of components) {
       const providers = component.providers
 
-      for (const [_, provider] of providers) {
+      for (const [, provider] of providers) {
         const wrapper = provider.getInstanceByContextId(STATIC_CONTEXT, provider.id)
 
         if (wrapper.isPending && !wrapper.isResolved) {
@@ -50,21 +43,39 @@ export class SqsService implements OnModuleInit {
   
         for (const method of methods) {
           const handler: HandlerFunction = prototype[method]
-          const meta = Reflect.getMetadata(SQS_CONSUMER, handler)
+          const meta = Reflect.getMetadata(SQS_CONSUMER, handler) as SqsConsumerParams
           if (!meta) {
             continue;
           }
 
-          if (typeof meta !== "object" && !("url" in meta)) {
-            this.logger.fatal("Incorrect metadata passed to SqsConsumer decorator. Expected an object with key, received", meta);
+          if (typeof meta !== "object") {
+            this.logger.fatal("Expected decorator parameter is a Record<string, string>, received", meta)
             continue;
           }
 
-          const url: string = meta["url"]
-          if (!url || typeof url !== "string") {
-            this.logger.fatal("Queue url must be a string, received", {url});
-            continue
+          const queueName = meta.name
+          const queueUrl = meta.url
+
+          let url: string;
+          if (queueName && queueUrl) {
+            this.logger.warn(`both queueName and queueUrl is provided in ${meta}, defaulting to url`)
+
+            url = queueUrl
+          } else if (queueName) {
+            if (!Object.hasOwn(this.queueNameUrlMap, queueName)) {
+              this.logger.error(`Cannot find a queue url for name ${queueName})`)
+              continue
+            }
+            url = this.queueNameUrlMap[queueName]
+          } else {
+            if (!queueUrl) {
+              this.logger.error("Queue url or name should be passed in the decorator")
+              continue;
+            }
+
+            url = queueUrl
           }
+
 
           this.logger.debug(`Found a sqs handler for ${url}`)
 

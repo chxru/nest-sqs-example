@@ -1,6 +1,6 @@
 import { DynamicModule, Global, Module } from '@nestjs/common';
-import { SqsService } from './sqs.service';
 import { MetadataScanner, ModulesContainer } from '@nestjs/core';
+import { SqsService } from './sqs.service';
 import { SqsOptions } from './sqs.types';
 
 @Global()
@@ -9,7 +9,7 @@ import { SqsOptions } from './sqs.types';
   exports: [SqsService],
 })
 export class SqsModule {
-  public static register(queueUrls: string[],sqsOptions?: SqsOptions): DynamicModule {
+  public static register(queueNameUrlMap: Record<string, string>, sqsOptions?: SqsOptions): DynamicModule {
     return {
       global: true,
       module: SqsModule,
@@ -20,7 +20,7 @@ export class SqsModule {
             modulesContainer: ModulesContainer,
             metadataScanner: MetadataScanner,
           ) => {
-              return new SqsService(modulesContainer, metadataScanner, queueUrls, sqsOptions)
+              return new SqsService(modulesContainer, metadataScanner, queueNameUrlMap, sqsOptions)
           },
           inject: [ModulesContainer, MetadataScanner]
         }
